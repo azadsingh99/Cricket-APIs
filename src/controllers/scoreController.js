@@ -76,6 +76,34 @@ const getScoreCard = async (req, res) => {
     
     const userName = users[0].name;
     
+    // Check if user has any scores
+    const [scoreExists] = await pool.query(
+      'SELECT COUNT(*) as count FROM scores WHERE user_id = ?',
+      [userId]
+    );
+    
+    // If no scores, default rank to "N/A" or similar
+    if (scoreExists[0].count === 0) {
+      // Create a scorecard with 0 score and "N/A" rank
+      const result = await generateScoreCard(userName, 0, "N/A");
+      
+      if (typeof result === 'string') {
+        return res.status(200).json({
+          success: true,
+          imageUrl: result
+        });
+      } else {
+        return res.status(200).json({
+          success: true,
+          scoreCard: result,
+          message: 'Image generation failed, returning data instead'
+        });
+      }
+      
+      return;
+    }
+    
+    // Get the total score
     const [scoreResult] = await pool.query(
       'SELECT SUM(score) as totalScore FROM scores WHERE user_id = ?',
       [userId]
@@ -124,15 +152,18 @@ const getWeeklyScores = async (req, res) => {
   try {
     const userId = req.user.id;
     
+    
+    const referenceDate = '2023-04-21';
+    
     const [weeklyData] = await pool.query(`
       SELECT 
-        FLOOR(DATEDIFF(created_at, '2023-04-18') / 7) + 1 as weekNo,
+        FLOOR(DATEDIFF(created_at, ?) / 7) + 1 as weekNo,
         SUM(score) as totalScore
       FROM scores
       WHERE user_id = ?
       GROUP BY weekNo
       ORDER BY weekNo ASC
-    `, [userId]);
+    `, [referenceDate, userId]);
     
     const weeks = [];
     
@@ -143,11 +174,11 @@ const getWeeklyScores = async (req, res) => {
             s.user_id,
             SUM(s.score) as total 
           FROM scores s
-          WHERE FLOOR(DATEDIFF(s.created_at, '2023-04-18') / 7) + 1 = ?
+          WHERE FLOOR(DATEDIFF(s.created_at, ?) / 7) + 1 = ?
           GROUP BY s.user_id
           HAVING total > ?
         ) as higher_scores
-      `, [week.weekNo, week.totalScore]);
+      `, [referenceDate, week.weekNo, week.totalScore]);
       
       const rank = rankResult[0].user_rank + 1;
       
